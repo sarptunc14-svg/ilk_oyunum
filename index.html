@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Tactical FPS - 1v1 Düello ve Vandal Skinleri</title>
+    <title>3D Tactical FPS - Her Girişte İsim Sorma</title>
     <style>
         * {
             margin: 0;
@@ -82,6 +82,18 @@
             border-radius: 5px;
         }
 
+        .player-info-hud {
+            position: absolute;
+            top: 30px;
+            left: 30px;
+            font-size: 18px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 8px 15px;
+            border: 1px solid #00d4ff;
+            border-radius: 5px;
+            color: #00ffcc;
+        }
+
         .gold-hud {
             position: absolute;
             top: 30px;
@@ -93,6 +105,46 @@
             border: 2px solid #ffaa00;
             color: #ffaa00;
             border-radius: 5px;
+        }
+
+        /* Login / Name Modal */
+        .name-modal {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(10, 10, 20, 0.98);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 300;
+            font-family: 'Courier New', monospace;
+            color: #00d4ff;
+        }
+
+        .name-modal.hide {
+            display: none;
+        }
+
+        .name-modal h1 {
+            font-size: 40px;
+            margin-bottom: 20px;
+            text-shadow: 0 0 15px rgba(0, 212, 255, 0.8);
+        }
+
+        .name-input {
+            padding: 12px 20px;
+            font-size: 18px;
+            background: #1a1a2e;
+            color: #ffaa00;
+            border: 2px solid #ffaa00;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            text-align: center;
+            font-family: 'Courier New', monospace;
+            outline: none;
         }
 
         /* Game Over & Shop Screens */
@@ -277,10 +329,18 @@
 </head>
 <body>
 
+    <!-- Her Girişte Oyuncu Adı Sorma Ekranı -->
+    <div class="name-modal" id="nameModal">
+        <h1>OYUNCU ADINI GİR</h1>
+        <input type="text" id="playerNameInput" class="name-input" placeholder="Örn: VandalPro" maxlength="15">
+        <button class="btn restart-btn" onclick="savePlayerName()">OYUNA BAŞLA</button>
+    </div>
+
     <div id="canvas-container"></div>
 
     <div class="hud">
         <div class="crosshair"></div>
+        <div class="player-info-hud">OYUNCU: <span id="displayName">Ajan</span></div>
         <div class="gold-hud">ALTIN: <span id="goldDisplay">0</span> 🪙</div>
         <div class="health-hud">CAN: <span id="hpDisplay">100</span>/100 | Kalkan: <span id="shieldDisplay">YOK</span></div>
         <div class="ammo-hud">MERMİ: <span id="ammoDisplay">30</span>/<span id="ammoPoolDisplay">90</span></div>
@@ -295,6 +355,7 @@
     <div class="game-over" id="gameOverScreen">
         <h1 id="gameOverTitle">GÖREV BAŞARISIZ</h1>
         <div class="stats-box">
+            <div>Oyuncu: <span id="finalPlayerName" style="color: #ffaa00;"></span></div>
             <div>Skor: <span id="finalScore">0</span> | Vurulan: <span id="finalKills">0</span></div>
             <div>Kazanılan Altın: <span id="finalGold">0</span> 🪙</div>
         </div>
@@ -358,6 +419,7 @@
     <script>
         let scene, camera, renderer;
         let player = {
+            name: 'Ajan',
             health: 100,
             maxHealth: 100,
             ammo: parseInt(localStorage.getItem('val_maxAmmo')) || 30,
@@ -379,12 +441,30 @@
         let bullets = [];
         let particles = [];
         let walls = [];
-        let gameRunning = true;
+        let gameRunning = false; // İsim girilene kadar oyun başl(a)maz
         let isDuelMode = false;
         let duelBot = null;
         let cameraAngleY = 0, cameraAngleX = 0;
         let brickMaterial;
         let weapon3DGroup, weaponBodyMat, weaponAccentMat;
+
+        function savePlayerName() {
+            const inputVal = document.getElementById('playerNameInput').value.trim();
+            if (inputVal !== "") {
+                player.name = inputVal;
+                savePlayerRecordToFile();
+            }
+            document.getElementById('displayName').textContent = player.name;
+            document.getElementById('nameModal').classList.add('hide');
+            gameRunning = true;
+        }
+
+        // Oyuncu kaydını tarayıcı geçmişine/dosya sistemine benzer şekilde arşivler
+        function savePlayerRecordToFile() {
+            let records = JSON.parse(localStorage.getItem('val_all_players') || '[]');
+            records.push({ name: player.name, date: new Date().toLocaleString(), gold: player.gold, score: player.score });
+            localStorage.setItem('val_all_players', JSON.stringify(records));
+        }
 
         function createBrickTexture() {
             const canvas = document.createElement('canvas');
@@ -472,10 +552,9 @@
             document.addEventListener('mousemove', onMouseMove);
             
             document.addEventListener('click', () => {
-                if (gameRunning) {
-                    document.body.requestPointerLock();
-                    shoot();
-                }
+                if (!gameRunning || !document.getElementById('nameModal').classList.contains('hide')) return;
+                document.body.requestPointerLock();
+                shoot();
             });
 
             window.addEventListener('resize', onWindowResize);
@@ -635,42 +714,31 @@
             player.ammoPool -= canReload;
         }
 
-        // İnsansı Karakter / 1v1 Bot Sınıfı
         class HumanoidEnemy {
             constructor(x, z, isDuel = false) {
                 this.group = new THREE.Group();
                 this.isDuel = isDuel;
 
                 const bodyGeo = new THREE.BoxGeometry(0.9, 1.2, 0.5);
-                const mat = new THREE.MeshStandardMaterial({ color: isDuel ? 0xa855f7 : 0xdc2626, roughness: 0.4 });
+                const mat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.4 });
                 const body = new THREE.Mesh(bodyGeo, mat);
                 body.position.y = 0.6;
                 body.castShadow = true;
                 this.group.add(body);
 
                 const headGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
-                const headMat = new THREE.MeshStandardMaterial({ color: isDuel ? 0xc084fc : 0xf87171, roughness: 0.5 });
+                const headMat = new THREE.MeshStandardMaterial({ color: 0xf87171, roughness: 0.5 });
                 const head = new THREE.Mesh(headGeo, headMat);
                 head.position.y = 1.45;
                 head.castShadow = true;
                 this.group.add(head);
 
-                const armGeo = new THREE.BoxGeometry(0.3, 1.0, 0.3);
-                const leftArm = new THREE.Mesh(armGeo, mat);
-                leftArm.position.set(-0.6, 0.6, 0);
-                this.group.add(leftArm);
-
-                const rightArm = new THREE.Mesh(armGeo, mat);
-                rightArm.position.set(0.6, 0.6, 0);
-                this.group.add(rightArm);
-
                 this.group.position.set(x, 0, z);
                 scene.add(this.group);
 
-                // Eğer 1v1 düellosundaysa seninle aynı cana (100) sahip olur!
                 this.health = isDuel ? 100 : 30;
                 this.maxHealth = this.health;
-                this.speed = isDuel ? 0.04 : 0.035;
+                this.speed = 0.035;
                 this.shootTimer = 0;
             }
 
@@ -679,7 +747,7 @@
                 const dz = camera.position.z - this.group.position.z;
                 const dist = Math.sqrt(dx*dx + dz*dz);
 
-                if (dist > 1.5) {
+                if (dist > 1.2) {
                     this.group.position.x += (dx / dist) * this.speed;
                     this.group.position.z += (dz / dist) * this.speed;
                     this.group.lookAt(camera.position.x, this.group.position.y, camera.position.z);
@@ -689,10 +757,9 @@
                     if (player.health <= 0) gameOver();
                 }
 
-                // 1v1 modundaysa bot da sana ateş eder!
                 if (this.isDuel) {
                     this.shootTimer++;
-                    if (this.shootTimer > 60) { // Her 1 saniyede bir ateş eder
+                    if (this.shootTimer > 70) {
                         this.shootTimer = 0;
                         this.shootAtPlayer();
                     }
@@ -708,9 +775,9 @@
                 bullet.position.y += 1.0;
 
                 const targetDir = new THREE.Vector3().subVectors(camera.position, this.group.position).normalize();
-                bullet.velocity = targetDir.multiplyScalar(1.0);
+                bullet.velocity = targetDir.multiplyScalar(0.9);
                 bullet.life = 100;
-                bullet.damage = 10; // Düelloda bot mermisi daha etkilidir
+                bullet.damage = 8;
                 bullet.isPlayer = false;
 
                 scene.add(bullet);
@@ -793,7 +860,6 @@
                         continue;
                     }
 
-                    // Eğer mermi oyuncudan çıktıysa düşmanlara çarpar
                     if (b.isPlayer) {
                         if (isDuelMode && duelBot) {
                             if (b.position.distanceTo(duelBot.group.position) < 1.0) {
@@ -810,7 +876,7 @@
                                     player.gold += 150;
                                     player.kills++;
                                     saveGameData();
-                                    alert("Tebrikler! 1v1 Düelloyu Kazandın! (+150 Altın)");
+                                    alert(`${player.name}, 1v1 Düelloyu Kazandın! (+150 Altın)`);
                                     restartGame();
                                 }
                                 continue;
@@ -838,9 +904,8 @@
                             }
                         }
                     } else {
-                        // Botun mermisi oyuncuya çarparsa
                         if (b.position.distanceTo(camera.position) < 1.0) {
-                            let damageTaken = player.hasShield ? 5 : 10;
+                            let damageTaken = player.hasShield ? 4 : 8;
                             player.health -= damageTaken;
                             scene.remove(b);
                             bullets.splice(i, 1);
@@ -885,13 +950,11 @@
             renderer.render(scene, camera);
         }
 
-        // 1v1 Düello Başlatma
         function start1v1Duel() {
             document.getElementById('gameOverScreen').classList.remove('show');
             restartGame();
             isDuelMode = true;
-            // Karşında seninle aynı özelliklere sahip özel bir 1v1 botu doğar
-            duelBot = new HumanoidEnemy(camera.position.x + 5, camera.position.z - 5, true);
+            duelBot = new HumanoidEnemy(camera.position.x + 6, camera.position.z - 6, true);
         }
 
         function openShop() {
@@ -981,6 +1044,7 @@
         function gameOver() {
             gameRunning = false;
             document.exitPointerLock();
+            document.getElementById('finalPlayerName').textContent = player.name;
             document.getElementById('finalScore').textContent = player.score;
             document.getElementById('finalKills').textContent = player.kills;
             document.getElementById('finalGold').textContent = player.gold;
